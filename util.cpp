@@ -154,7 +154,7 @@ inline int OutputDebugStringF(const char* pszFormat, ...)
         ret = vprintf(pszFormat, arg_ptr);
         va_end(arg_ptr);
     }
-    else
+    if (fPrintToDebugger)
     {
         // print to debug.log
         static FILE* fileout = NULL;
