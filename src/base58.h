@@ -160,12 +160,21 @@ inline bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>
 
 
 #define ADDRESSVERSION   ((unsigned char)(fTestNet ? 111 : 0))
+#define PRIVKEYVERSION   ((unsigned char)(fTestNet ? 239 : 128))
 
 inline std::string Hash160ToAddress(uint160 hash160)
 {
     // add 1-byte version number to the front
     std::vector<unsigned char> vch(1, ADDRESSVERSION);
     vch.insert(vch.end(), UBEGIN(hash160), UEND(hash160));
+    return EncodeBase58Check(vch);
+}
+
+inline std::string PrivKeyToSecret(uint256 privkey)
+{
+    // add 1-byte version number to the front
+    std::vector<unsigned char> vch(1, PRIVKEYVERSION);
+    vch.insert(vch.end(), UBEGIN(privkey), UEND(privkey));
     return EncodeBase58Check(vch);
 }
 
@@ -180,12 +189,30 @@ inline bool AddressToHash160(const char* psz, uint160& hash160Ret)
     if (vch.size() != sizeof(hash160Ret) + 1)
         return false;
     memcpy(&hash160Ret, &vch[1], sizeof(hash160Ret));
-    return (nVersion <= ADDRESSVERSION);
+    return (nVersion <= ADDRESSVERSION && nVersion < 128);
+}
+
+inline bool SecretToPrivKey(const char *psz, uint256& privkeyRet) {
+    std::vector<unsigned char> vch;
+    if (!DecodeBase58Check(psz, vch))
+        return false;
+    if (vch.empty())
+        return false;
+    unsigned char nVersion = vch[0];
+    if (vch.size() != sizeof(privkeyRet) + 1)
+        return false;
+    memcpy(&privkeyRet, &vch[1], sizeof(privkeyRet));
+    return (nVersion <= PRIVKEYVERSION && nVersion >= 128);
 }
 
 inline bool AddressToHash160(const std::string& str, uint160& hash160Ret)
 {
     return AddressToHash160(str.c_str(), hash160Ret);
+}
+
+inline bool SecretToPrivKey(const std::string& str, uint256& privkeyRet)
+{
+    return SecretToPrivKey(str.c_str(), privkeyRet);
 }
 
 inline bool IsValidBitcoinAddress(const char* psz)
@@ -194,13 +221,21 @@ inline bool IsValidBitcoinAddress(const char* psz)
     return AddressToHash160(psz, hash160);
 }
 
+inline bool IsValidBitcoinSecret(const char* psz)
+{
+    uint256 privkey;
+    return SecretToPrivKey(psz, privkey);
+}
+
 inline bool IsValidBitcoinAddress(const std::string& str)
 {
     return IsValidBitcoinAddress(str.c_str());
 }
 
-
-
+inline bool IsValidBitcoinSecret(const std::string& str)
+{
+    return IsValidBitcoinSecret(str.c_str());
+}
 
 inline std::string PubKeyToAddress(const std::vector<unsigned char>& vchPubKey)
 {

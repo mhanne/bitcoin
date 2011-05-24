@@ -459,7 +459,9 @@ public:
     int64 GetAccountCreditDebit(const std::string& strAccount);
     void ListAccountCreditDebit(const std::string& strAccount, std::list<CAccountingEntry>& acentries);
 
+    void GetAllReserveKeys(std::set<uint160>& keys);
     bool LoadWallet();
+    void AddReserveKey(const std::vector<unsigned char>& key);
 protected:
     void ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool);
     void KeepKey(int64 nIndex);

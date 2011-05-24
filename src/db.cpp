@@ -953,6 +953,16 @@ void BackupWallet(const string& strDest)
     }
 }
 
+void CWalletDB::AddReserveKey(const vector<unsigned char>& key)
+{
+    int64 nEnd = 1;
+    if (!setKeyPool.empty())
+        nEnd = *(--setKeyPool.end()) + 1;
+    if (!Write(make_pair(string("pool"), nEnd), CKeyPool(key)))
+        throw runtime_error("ReserveKeyFromKeyPool() : writing generated key failed");
+    setKeyPool.insert(nEnd);
+    printf("keypool added key %"PRI64d", size=%d\n", nEnd, setKeyPool.size());
+}
 
 void CWalletDB::ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool)
 {
@@ -966,13 +976,8 @@ void CWalletDB::ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool)
         int64 nTargetSize = max(GetArg("-keypool", 100), (int64)0);
         while (setKeyPool.size() < nTargetSize+1)
         {
-            int64 nEnd = 1;
-            if (!setKeyPool.empty())
-                nEnd = *(--setKeyPool.end()) + 1;
-            if (!Write(make_pair(string("pool"), nEnd), CKeyPool(GenerateNewKey())))
-                throw runtime_error("ReserveKeyFromKeyPool() : writing generated key failed");
-            setKeyPool.insert(nEnd);
-            printf("keypool added key %"PRI64d", size=%d\n", nEnd, setKeyPool.size());
+            vector<unsigned char> key = GenerateNewKey();
+            AddReserveKey(key);
         }
 
         // Get the oldest key
@@ -1025,4 +1030,22 @@ int64 GetOldestKeyPoolTime()
     walletdb.ReserveKeyFromKeyPool(nIndex, keypool);
     walletdb.ReturnKey(nIndex);
     return keypool.nTime;
+}
+
+void CWalletDB::GetAllReserveKeys(set<uint160>& keys)
+{
+    keys.clear();
+
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_setKeyPool)
+    BOOST_FOREACH(const int64& id, setKeyPool)
+    {
+        CKeyPool keypool;
+        if (!Read(make_pair(string("pool"), id), keypool))
+            throw runtime_error("GetAllReserveKeys() : read failed");
+        if (!mapKeys.count(keypool.vchPubKey))
+            throw runtime_error("GetAllReserveKeys() : unknown key in key pool");
+        assert(!keypool.vchPubKey.empty());
+        keys.insert(Hash160(keypool.vchPubKey));
+    }
 }

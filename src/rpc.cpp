@@ -12,6 +12,7 @@
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/stream.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/lexical_cast.hpp>
 #ifdef USE_SSL
 #include <boost/asio/ssl.hpp> 
 #include <boost/filesystem/fstream.hpp>
@@ -1304,6 +1305,515 @@ Value validateaddress(const Array& params, bool fHelp)
     return ret;
 }
 
+class CTxDump
+{
+public:
+    CBlockIndex *pindex;
+    int64 nValue;
+    bool fSpent;
+    CWalletTx* ptx;
+    int nOut;
+    CTxDump(CWalletTx* ptx = NULL, int nOut = -1)
+    {
+        pindex = NULL;
+        nValue = 0;
+        fSpent = false;
+        this->ptx = ptx;
+        this->nOut = nOut;
+    }
+};
+
+class CKeyDump
+{
+public:
+    uint256 key;
+    string strLabel;
+    bool fLabel;
+    CBlockIndex *pindexUsed;
+    CBlockIndex *pindexAvail;
+    int64 nValue;
+    int64 nAvail;
+    vector<CTxDump> vtxdmp;
+    bool fReserve;
+    bool fUsed;
+    CKeyDump(uint256 key = 0)
+    {
+        strLabel = "";
+        pindexUsed = NULL;
+        pindexAvail = NULL;
+        nValue = 0;
+        nAvail = 0;
+        fReserve = false;
+        fUsed = false;
+        fLabel = false;
+        this->key = key;
+    }
+};
+
+void GetWalletDump(map<uint160,CKeyDump> &mapDump)
+{
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapKeys)
+    CRITICAL_BLOCK(cs_mapWallet)
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        for (map<vector<unsigned char>, CPrivKey>::iterator it = mapKeys.begin(); it != mapKeys.end(); ++it)
+        {
+            CKey key;
+            key.SetPrivKey((*it).second);
+            mapDump[Hash160((*it).first)] = CKeyDump(key.GetPrivKeyInner());
+        }
+        for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
+        {
+            CWalletTx* coin=&(*it).second;
+            CBlockIndex *pindex;
+            if (coin->GetDepthInMainChain(pindex)>0)
+            {
+                for (int i=0; i < coin->vout.size(); i++) 
+                {
+                    CTxOut &out = coin->vout[i];
+                    int64 nCredit = out.GetCredit();
+                    if (nCredit > 0)
+                    {
+                        CTxDump txdmp(coin,i);
+                        txdmp.pindex = pindex;
+                        txdmp.nValue = nCredit;
+                        txdmp.fSpent = coin->IsSpent(i);
+                        uint160 hash160 = 0;
+                        vector<unsigned char> vchPubKey;
+                        if (ExtractHash160(out.scriptPubKey, hash160))
+                            true;
+                        else if (ExtractPubKey(out.scriptPubKey, false, vchPubKey))
+                            hash160 = Hash160(vchPubKey);
+                        if (mapDump.count(hash160) == 0)
+                        {
+                            uint256 keyDummy = 0;
+                            mapDump[hash160] = CKeyDump(keyDummy);
+                        }
+                        CKeyDump &keydump = mapDump[hash160];
+                        if (keydump.pindexUsed==NULL || keydump.pindexUsed->nHeight > txdmp.pindex->nHeight)
+                            keydump.pindexUsed = txdmp.pindex;
+                        if (!txdmp.fSpent && (keydump.pindexAvail==NULL || keydump.pindexAvail->nHeight > txdmp.pindex->nHeight))
+                            keydump.pindexAvail = txdmp.pindex;
+                        keydump.nValue += txdmp.nValue;
+                        if (!txdmp.fSpent)
+                            keydump.nAvail += txdmp.nValue;
+                        keydump.vtxdmp.push_back(txdmp);
+                        keydump.fUsed = true;
+                    }
+                }
+            }
+        }
+        set<uint160> reserveKeys;
+        CWalletDB wallet;
+        wallet.GetAllReserveKeys(reserveKeys);
+        BOOST_FOREACH(const uint160& key, reserveKeys)
+        {
+             if (mapDump.count(key) && !mapDump[key].fUsed)
+                 mapDump[key].fReserve = true;
+        }
+        for (map<uint160, CKeyDump>::iterator it = mapDump.begin(); it != mapDump.end(); ++it)
+        {
+            string strAddress = Hash160ToAddress((*it).first);
+            if (mapAddressBook.count(strAddress))
+            {
+                (*it).second.fLabel = true;
+                (*it).second.fReserve = false;
+                (*it).second.strLabel = mapAddressBook[strAddress];
+            }
+        }
+    }
+}
+
+
+Value importprivkey(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "importprivkey <bitcoinprivkey>\n"
+            "Adds a private key (as returned by dumpprivkey) to your wallet.");
+
+    string secret = params[0].get_str();
+    uint256 privKey;
+    bool fGood = SecretToPrivKey(secret,privKey);
+
+    if (!fGood) throw JSONRPCError(-5,"Invalid private key");
+
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapKeys)
+    CRITICAL_BLOCK(cs_mapWallet)
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        CKey key;
+        key.SetPrivKeyInner(privKey);
+        vector<unsigned char> vchPubKey = key.GetPubKey();
+        string strAddress = PubKeyToAddress(vchPubKey);
+        string strAccount = "imported";
+        SetAddressBookName(strAddress, strAccount);
+
+        if (!AddKey(key))
+            throw JSONRPCError(-4,"Error adding key to wallet");
+
+        ScanForWalletTransactions(pindexGenesisBlock);
+        ReacceptWalletTransactions();
+    }
+
+    MainFrameRepaint();
+
+    return Value::null;
+}
+
+int RetrieveSecret(const uint160 &address, uint256 &privKey)
+{
+    if (mapPubKeys.count(address))
+    {
+        vector<unsigned char> &pubKey = mapPubKeys[address];
+        if (mapKeys.count(pubKey))
+        {
+            CPrivKey &cp = mapKeys[pubKey];
+            CKey key;
+            key.SetPrivKey(cp);
+            privKey = key.GetPrivKeyInner();
+            return 0;
+        }
+        return -1;
+    }
+    return -2;
+}
+
+Value dumpprivkey(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "dumpprivkey <bitcoinaddress>\n"
+            "Reveals the private key corresponding to <bitcoinaddress>.");
+
+    string addr = params[0].get_str();
+    uint160 address;
+    bool fGood = AddressToHash160(addr, address);
+    if (fGood<0)
+        throw JSONRPCError(-5, "Invalid bitcoin address");
+    uint256 privKey;
+    int nOk = RetrieveSecret(address, privKey);
+    if (nOk<0)
+        throw JSONRPCError(-4,"Private key for address " + addr + " is not known");
+    string secret = PrivKeyToSecret(privKey);
+    return secret;
+}
+
+Value importwallet(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() < 1)
+        throw runtime_error(
+            "importwallet <file> [options]...\n"
+            "Import dumped wallet.\nOptions:\n"
+            "    rescan:   rescan for transactions after dump was made\n"
+        );
+
+    bool fRescan=false;
+    for (int i = 1; i<params.size(); i++)
+    {
+        string strArg = params[i].get_str();
+        if (strArg == "rescan")
+            fRescan = true;
+    }
+
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapKeys)
+    CRITICAL_BLOCK(cs_mapWallet)
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        int nKnownHeight = 0;
+        int nRescanHeight = pindexBest->nHeight;
+        set<uint256> setRescanTx;
+        set<uint160> setReserveKey;
+
+        Object objDump = params[0].get_obj();
+
+        Value valLoc = find_value(objDump, "loc");
+        if (valLoc.type() != null_type)
+        {
+            vector<uint256> vblockKnown;
+            Object objLoc = valLoc.get_obj();
+            map<string,Value> mapLoc;
+            obj_to_map(objLoc, mapLoc);
+            BOOST_FOREACH(PAIRTYPE(const string, Value)& item, mapLoc)
+                vblockKnown.push_back(uint256(item.first));
+            CBlockLocator locatorDump = vblockKnown;
+            nKnownHeight = locatorDump.GetHeight();
+            printf("import: known height: %i\n", nKnownHeight);
+        }
+
+        if (fRescan)
+            nRescanHeight = nKnownHeight;
+
+        Value valKeys = find_value(objDump, "keys");
+        if (valKeys.type() != null_type)
+        {
+            Array arrKeys = valKeys.get_array();
+            BOOST_FOREACH(const Value& valKey, arrKeys)
+            {
+                // iterate over keys
+                Object objKey = valKey.get_obj();
+                string strSecret = find_value(objKey, "sec").get_str();
+                uint256 privKey;
+                bool fGood = SecretToPrivKey(strSecret,privKey);
+                if (!fGood)
+                    continue;
+                CKey key;
+                key.SetPrivKeyInner(privKey);
+                vector<unsigned char> vchPubKey = key.GetPubKey();
+                string strAddress = PubKeyToAddress(vchPubKey);
+                printf("import: added address %s\n",strAddress.c_str());
+                AddKey(key);
+                Value valLabel = find_value(objKey, "label");
+                if (valLabel.type() != null_type)
+                {
+                    string strLabel = valLabel.get_str();
+                    SetAddressBookName(strAddress, strLabel);
+                    printf("import: set label of address %s to '%s'\n",strAddress.c_str(),strLabel.c_str());
+                }
+                if (find_value(objKey, "reserve").type() != null_type)
+                {
+                    uint160 hashAddr = Hash160(vchPubKey);
+                    setReserveKey.insert(hashAddr);
+                    printf("import: %s preliminary marked reserve\n",strAddress.c_str());
+                }
+                Value valTxs = find_value(objKey, "tx");
+                if (valTxs.type() != null_type) // transactions are listed, check them
+                {
+                    Object objTxs = valTxs.get_obj();
+                    map<string, Value> mapTxs;
+                    obj_to_map(objTxs, mapTxs);
+                    BOOST_FOREACH(PAIRTYPE(const string, Value)& item, mapTxs) // loop over transactions
+                    {
+                        Object objTx = item.second.get_obj();
+                        Value valTxHeight = find_value(objTx, "height");
+                        int nTxHeight = -1;
+                        string strTxOut = item.first;
+                        size_t nPos = strTxOut.find_first_of(':');
+                        if (nPos != string::npos) // strip off nOut from tx string
+                            strTxOut = strTxOut.substr(0, nPos);
+                        if (valTxHeight.type() != null_type)
+                            nTxHeight = valTxHeight.get_int();
+                        if (nTxHeight <= nRescanHeight) // tx height is unknown, or below height from which we will rescan anyway
+                        {
+                            uint256 hashTx = uint256(strTxOut);
+                            setRescanTx.insert(hashTx);
+                            printf("import: %s will cause rescan of tx %s\n",hashTx.GetHex().c_str());
+                        }
+                    }
+                }
+                else
+                {
+                    Value valHeight = find_value(objKey, "height");
+                    if (valHeight.type() != null_type)
+                    {
+                        int nHeight = valHeight.get_int();
+                        if (nHeight <= nRescanHeight) // height is below height from which we will rescan anyway
+                        {
+                            nRescanHeight = nHeight-1;
+                            printf("import: %s will need rescan from block %i\n",strAddress.c_str(),nHeight);
+                        }
+                    }
+                }
+            }
+        }
+
+        // rescan separate tx's
+        BOOST_FOREACH(const uint256& hashTx, setRescanTx)
+        {
+            printf("import: rescanning tx %s\n",hashTx.GetHex().c_str());
+            ScanForWalletTransaction(hashTx);
+        }
+        CBlockIndex* pindex = pindexGenesisBlock;
+        while (pindex && pindex->nHeight <= nRescanHeight)
+            pindex = pindex->pnext;
+        // rescan the end completely
+        printf("import: rescanning from height %i\n",nRescanHeight+1);
+        ScanForWalletTransactions(pindex);
+
+        if (nRescanHeight != pindexBest->nHeight && !setReserveKey.empty())
+        {
+            printf("import: scanning preliminary reserve keys\n");
+            // scan wallet for transactions crediting imported reserve keys
+            BOOST_FOREACH(const PAIRTYPE(uint256,CWalletTx)& item, mapWallet)
+            {
+                BOOST_FOREACH(const CTxOut& txout, item.second.vout)
+                {
+                    uint160 hashAddr;
+                    if (ExtractHash160(txout.scriptPubKey, hashAddr))
+                    {
+                        if (setReserveKey.count(hashAddr))
+                        {
+                            printf("import: wallettx %s credits %s: not reserve\n",item.first.GetHex().c_str(),Hash160ToAddress(hashAddr).c_str());
+                            setReserveKey.erase(hashAddr);
+                        }
+                    }
+                }
+            }
+        }
+
+        // add remaining reserve keys to pool
+        CWalletDB walletdb;
+        BOOST_FOREACH(const uint160& hashAddr, setReserveKey)
+        {
+            vector<unsigned char> vchPubKey = mapPubKeys[hashAddr];
+            printf("import: adding %s to key pool\n",PubKeyToAddress(vchPubKey).c_str());
+            walletdb.AddReserveKey(vchPubKey);
+        }
+
+        ReacceptWalletTransactions();
+    }
+
+    MainFrameRepaint();
+
+    printf("import: done\n");
+    return "";
+}
+
+Value dumpwallet(const Array& params, bool fHelp)
+{
+    if (fHelp)
+        throw runtime_error(
+            "dumpwallet [option]...\n"
+            "Dump wallet.\nOptions:\n"
+            "    block:      include block information\n"
+            "    tx:         include transaction-specific information\n"
+            "    noreserve:  do not dump reserve keys\n"
+            "    nolabel:    do not include address labels\n"
+            "    nospent:    do not include spent keys/transactions\n"
+            "    terse:      do not include addresses and amounts\n"
+            "    compact:    no indentation or newlines\n"
+            "Not included in dump: configuration settings, unconfirmed\n"
+            "transactions, account information"
+        );
+
+    bool fBlock=false, fTx=false, fReserve=true, fLabel=true, fSpent=true,
+         fAddr=true, fAmount=true, fCompact=false;
+    for (int i = 0; i<params.size(); i++)
+    {
+        string strArg = params[i].get_str();
+        if (strArg == "block")
+            fBlock = true;
+        if (strArg == "tx")
+            fTx = true;
+        if (strArg == "noreserve")
+            fReserve = false;
+        if (strArg == "nolabel")
+            fLabel = false;
+        if (strArg == "nospent")
+            fSpent = false;
+        if (strArg == "terse")
+        {
+            fAddr = false;
+            fAmount = false;
+        }
+        if (strArg == "compact")
+            fCompact = true;
+        if (strArg == "backup")
+        {
+            fReserve = true;
+            fLabel = true;
+            fSpent = true;
+        }
+        if (strArg == "scratchoff")
+        {
+            fBlock = false;
+            fTx = true;
+            fReserve = false;
+            fLabel = false;
+            fSpent = false;
+            fAddr = false;
+            fAmount = false;
+            fCompact = true;
+        }
+    }
+
+    map<uint160,CKeyDump> mapDump;
+    GetWalletDump(mapDump);
+    Array keys;
+    int nHeight = pindexBest->nHeight;
+    for (map<uint160, CKeyDump>::iterator it = mapDump.begin(); it != mapDump.end(); ++it)
+    {
+        CKeyDump &keydump = (*it).second;
+        if (!fReserve && keydump.fReserve)
+            continue;
+        if (!fSpent && keydump.nAvail==0)
+            continue;
+        Object jsonKey;
+        if (fAddr)
+            jsonKey.push_back(Pair("addr",Hash160ToAddress((*it).first)));
+        jsonKey.push_back(Pair("sec",PrivKeyToSecret(keydump.key)));
+        if (fLabel && keydump.fLabel)
+            jsonKey.push_back(Pair("label",keydump.strLabel));
+        if (fBlock && !fTx && fSpent)
+        {
+            if (keydump.pindexUsed)
+                jsonKey.push_back(Pair("height",(boost::int64_t)keydump.pindexUsed->nHeight));
+            else
+                jsonKey.push_back(Pair("height",(boost::int64_t)nHeight));
+        }
+        if (fBlock && !fTx)
+        {
+            if (keydump.pindexAvail)
+                jsonKey.push_back(Pair("heightAvail",(boost::int64_t)keydump.pindexAvail->nHeight));
+            else
+                jsonKey.push_back(Pair("heightAvail",(boost::int64_t)nHeight));
+        }
+        if (fAmount && !fTx && keydump.fUsed && fSpent)
+            jsonKey.push_back(Pair("value",FormatMoney(keydump.nValue)));
+        if (fAmount && !fTx && keydump.nAvail>0)
+            jsonKey.push_back(Pair("valueAvail",FormatMoney(keydump.nAvail)));
+        if (keydump.fReserve)
+            jsonKey.push_back(Pair("reserve",(boost::int64_t)1));
+        if (fTx)
+        {
+            Object jsonTxs;
+            BOOST_FOREACH(CTxDump& txdump, keydump.vtxdmp)
+            {
+                Object jsonTx;
+                if (!fSpent && txdump.fSpent)
+                    continue;
+                if (txdump.pindex)
+                {
+                    if (fBlock) 
+                        jsonTx.push_back(Pair("height",(boost::int64_t)txdump.pindex->nHeight));
+                }
+                if (fAmount)
+                    jsonTx.push_back(Pair("value",FormatMoney(txdump.nValue)));
+                if (txdump.fSpent)
+                    jsonTx.push_back(Pair("spent",(boost::int64_t)1));
+                jsonTxs.push_back(Pair(txdump.ptx->GetHash().GetHex() + ":" + boost::lexical_cast<std::string>(txdump.nOut),jsonTx));
+            }
+            jsonKey.push_back(Pair("tx",jsonTxs));
+        }
+        keys.push_back(jsonKey);
+    }
+    Object ret;
+    ret.push_back(Pair("keys",keys));
+    if (fBlock)
+    {
+        Object loc;
+        CBlockIndex* pindexLoop = pindexBest;
+        int nStep = 1;
+        int nElem = 0;
+        while (pindexLoop)
+        {
+            loc.push_back(Pair(pindexLoop->GetBlockHash().GetHex(),pindexLoop->nHeight));
+            nElem++;
+            for (int i = 0; pindexLoop && i < nStep; i++)
+                pindexLoop = pindexLoop->pprev;
+            if (nElem > 5)
+                nStep *= 2;
+        }
+        ret.push_back(Pair("loc",loc));
+    }
+    if (fCompact)
+        return write_string(Value(ret), false);
+    return ret;
+}
+
 
 Value getwork(const Array& params, bool fHelp)
 {
@@ -1464,6 +1974,10 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getwork",               &getwork),
     make_pair("listaccounts",          &listaccounts),
     make_pair("settxfee",              &settxfee),
+    make_pair("dumpprivkey",           &dumpprivkey),
+    make_pair("importprivkey",         &importprivkey),
+    make_pair("dumpwallet",            &dumpwallet),
+    make_pair("importwallet",          &importwallet),
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
 
@@ -2127,6 +2641,19 @@ int CommandLineRPC(int argc, char *argv[])
             params[1] = v.get_obj();
         }
         if (strMethod == "sendmany"                && n > 2) ConvertTo<boost::int64_t>(params[2]);
+        if (strMethod == "importwallet"            && n > 0)
+        {
+            ifstream file;
+            file.open(params[0].get_str().c_str());
+            if (!file.good())
+                throw runtime_error("cannot read file");
+            stringbuf buf;
+            file.get(buf, -1);
+            Value v;
+            if (!read_string(buf.str(), v))
+                throw runtime_error("cannot parse file");
+            params[0] = v.get_obj();
+        }
 
         // Execute
         Object reply = CallRPC(strMethod, params);

@@ -178,7 +178,7 @@ bool AddToWallet(const CWalletTx& wtxIn)
     return true;
 }
 
-bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate = false)
+bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate = false, bool fFindBlock = false)
 {
     uint256 hash = tx.GetHash();
     bool fExisted = mapWallet.count(hash);
@@ -187,7 +187,7 @@ bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool
     {
         CWalletTx wtx(tx);
         // Get merkle branch if transaction was found in a block
-        if (pblock)
+        if (fFindBlock || pblock)
             wtx.SetMerkleBranch(pblock);
         return AddToWallet(wtx);
     }
@@ -819,7 +819,7 @@ bool CTransaction::RemoveFromMemoryPool()
 
 
 
-int CMerkleTx::GetDepthInMainChain(int& nHeightRet) const
+int CMerkleTx::GetDepthInMainChain(CBlockIndex* &pindexRet) const
 {
     if (hashBlock == 0 || nIndex == -1)
         return 0;
@@ -840,7 +840,7 @@ int CMerkleTx::GetDepthInMainChain(int& nHeightRet) const
         fMerkleVerified = true;
     }
 
-    nHeightRet = pindex->nHeight;
+    pindexRet = pindex;
     return pindexBest->nHeight - pindex->nHeight + 1;
 }
 
@@ -908,6 +908,15 @@ int ScanForWalletTransactions(CBlockIndex* pindexStart, bool fUpdate)
         }
     }
     return ret;
+}
+
+int ScanForWalletTransaction(const uint256& hashTx)
+{
+    CTransaction tx;
+    tx.ReadFromDisk(COutPoint(hashTx, 0));
+    if (AddToWalletIfInvolvingMe(tx, NULL, true, true))
+        return 1;
+    return 0;
 }
 
 void ReacceptWalletTransactions()

@@ -97,6 +97,7 @@ std::vector<unsigned char> GenerateNewKey();
 bool AddToWallet(const CWalletTx& wtxIn);
 void WalletUpdateSpent(const COutPoint& prevout);
 int ScanForWalletTransactions(CBlockIndex* pindexStart, bool fUpdate = false);
+int ScanForWalletTransaction(const uint256& hashTx);
 void ReacceptWalletTransactions();
 bool LoadBlockIndex(bool fAllowNew=true);
 void PrintBlockTree();
@@ -779,8 +780,8 @@ public:
 
 
     int SetMerkleBranch(const CBlock* pblock=NULL);
-    int GetDepthInMainChain(int& nHeightRet) const;
-    int GetDepthInMainChain() const { int nHeight; return GetDepthInMainChain(nHeight); }
+    int GetDepthInMainChain(CBlockIndex* &pindexRet) const;
+    int GetDepthInMainChain() const { CBlockIndex *pindexRet; return GetDepthInMainChain(pindexRet); }
     bool IsInMainChain() const { return GetDepthInMainChain() > 0; }
     int GetBlocksToMaturity() const;
     bool AcceptToMemoryPool(CTxDB& txdb, bool fCheckInputs=true);
@@ -1142,6 +1143,7 @@ public:
         return !(a == b);
     }
     int GetDepthInMainChain() const;
+ 
 };
 
 
@@ -1641,6 +1643,11 @@ public:
         std::map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashBlock);
         if (mi != mapBlockIndex.end())
             Set((*mi).second);
+    }
+
+    CBlockLocator(const std::vector<uint256>& vHaveIn)
+    {
+        vHave = vHaveIn;
     }
 
     IMPLEMENT_SERIALIZE
