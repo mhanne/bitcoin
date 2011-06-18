@@ -1428,12 +1428,14 @@ void GetWalletDump(map<uint160,CKeyDump> &mapDump)
 
 Value importprivkey(const Array& params, bool fHelp)
 {
-    if (fHelp || params.size() != 1)
+    if (fHelp || params.size() < 1 || params.size() > 2)
         throw runtime_error(
-            "importprivkey <bitcoinprivkey>\n"
+            "importprivkey <bitcoinprivkey> [account]\n"
             "Adds a private key (as returned by dumpprivkey) to your wallet.");
 
     string secret = params[0].get_str();
+    string strAccount = "";
+    if(params.size() > 1) strAccount = params[1].get_str();
     uint256 privKey;
     bool fGood = SecretToPrivKey(secret,privKey);
 
@@ -1448,7 +1450,6 @@ Value importprivkey(const Array& params, bool fHelp)
         key.SetPrivKeyInner(privKey);
         vector<unsigned char> vchPubKey = key.GetPubKey();
         string strAddress = PubKeyToAddress(vchPubKey);
-        string strAccount = "imported";
         SetAddressBookName(strAddress, strAccount);
 
         if (!AddKey(key))
