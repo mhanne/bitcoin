@@ -1501,6 +1501,36 @@ Value dumpprivkey(const Array& params, bool fHelp)
     return secret;
 }
 
+Value removeprivkey(const Array& params, bool fHelp)
+{
+    if(fHelp || params.size() != 1)
+        throw runtime_error(
+            "removeprivkey <bitcoinaddress>\n"
+            "Removes the private key corresponding to <bitcoinaddress>.");
+
+    string addr = params[0].get_str();
+    uint160 address;
+    bool fGood = AddressToHash160(addr, address);
+    if (fGood<0)
+        throw JSONRPCError(-5, "Invalid bitcoin address");
+
+    CRITICAL_BLOCK(cs_main)
+    CRITICAL_BLOCK(cs_mapKeys)
+    CRITICAL_BLOCK(cs_mapWallet)
+    CRITICAL_BLOCK(cs_mapAddressBook)
+    {
+        vector<unsigned char> &pubKey = mapPubKeys[address];
+
+        CWalletDB().EraseName(addr);
+        CWalletDB().EraseKey(pubKey);
+
+        mapKeys.erase(pubKey);
+        mapPubKeys.erase(address);
+    }
+    return addr;
+}
+
+
 Value importwallet(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 1)
@@ -1978,6 +2008,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("importprivkey",         &importprivkey),
     make_pair("dumpwallet",            &dumpwallet),
     make_pair("importwallet",          &importwallet),
+    make_pair("removeprivkey",         &removeprivkey),
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
 
