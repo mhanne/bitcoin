@@ -1514,13 +1514,16 @@ Value removeprivkey(const Array& params, bool fHelp)
     if (fGood<0)
         throw JSONRPCError(-5, "Invalid bitcoin address");
 
+    vector<unsigned char> &pubKey = mapPubKeys[address];
+
+    if (!mapKeys.count(pubKey))
+        throw JSONRPCError(-4, "Private key for address " + addr + " is not known");
+
     CRITICAL_BLOCK(cs_main)
     CRITICAL_BLOCK(cs_mapKeys)
     CRITICAL_BLOCK(cs_mapWallet)
     CRITICAL_BLOCK(cs_mapAddressBook)
     {
-        vector<unsigned char> &pubKey = mapPubKeys[address];
-
         CWalletDB().EraseName(addr);
         CWalletDB().EraseKey(pubKey);
 
