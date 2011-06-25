@@ -7,6 +7,7 @@
 #include "net.h"
 #include "init.h"
 #include "strlcpy.h"
+#include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
 
@@ -140,9 +141,18 @@ bool AppInit2(int argc, char* argv[])
 
     if (mapArgs.count("-datadir"))
     {
-        filesystem::path pathDataDir = filesystem::system_complete(mapArgs["-datadir"]);
-        strlcpy(pszSetDataDir, pathDataDir.string().c_str(), sizeof(pszSetDataDir));
+        if (filesystem::is_directory(filesystem::system_complete(mapArgs["-datadir"])))
+        {
+            filesystem::path pathDataDir = filesystem::system_complete(mapArgs["-datadir"]);
+            strlcpy(pszSetDataDir, pathDataDir.string().c_str(), sizeof(pszSetDataDir));
+        }
+        else
+        {
+            fprintf(stderr, "Error: Specified directory does not exist\n");
+            Shutdown(NULL);
+        }
     }
+
 
     ReadConfigFile(mapArgs, mapMultiArgs); // Must be done after processing datadir
 
