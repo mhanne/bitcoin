@@ -103,23 +103,19 @@ bool CCryptoKeyStore::AddCryptedKey(const std::vector<unsigned char> &vchPubKey,
     return true;
 }
 
-bool CCryptoKeyStore::GetKey(const CBitcoinAddress &address, CKey& keyOut) const
+bool CCryptoKeyStore::GetSecret(const CBitcoinAddress &address, CSecret& vchSecretOut) const
 {
     CRITICAL_BLOCK(cs_vMasterKey)
     {
         if (!IsCrypted())
-            return CBasicKeyStore::GetKey(address, keyOut);
+            return CBasicKeyStore::GetSecret(address, vchSecretOut);
 
         CryptedKeyMap::const_iterator mi = mapCryptedKeys.find(address);
         if (mi != mapCryptedKeys.end())
         {
             const std::vector<unsigned char> &vchPubKey = (*mi).second.first;
             const std::vector<unsigned char> &vchCryptedSecret = (*mi).second.second;
-            CSecret vchSecret;
-            if (!DecryptSecret(vMasterKey, vchCryptedSecret, Hash(vchPubKey.begin(), vchPubKey.end()), vchSecret))
-                return false;
-            keyOut.SetSecret(vchSecret);
-            return true;
+            return DecryptSecret(vMasterKey, vchCryptedSecret, Hash(vchPubKey.begin(), vchPubKey.end()), vchSecretOut);
         }
     }
     return false;
