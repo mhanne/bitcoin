@@ -28,7 +28,7 @@ bool CKeyStore::GetPubKey(const CBitcoinAddress &address, std::vector<unsigned c
 bool CBasicKeyStore::AddKey(const CKey& key)
 {
     CRITICAL_BLOCK(cs_KeyStore)
-        mapKeys[key.GetAddress()] = key.GetSecret();
+        mapKeys[CBitcoinAddress(key.GetPubKey())] = key.GetSecret();
     return true;
 }
 

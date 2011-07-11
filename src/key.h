@@ -220,11 +220,6 @@ public:
             return false;
         return true;
     }
-
-    CBitcoinAddress GetAddress() const
-    {
-        return CBitcoinAddress(GetPubKey());
-    }
 };
 
 #endif
