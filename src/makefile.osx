@@ -45,6 +45,7 @@ OBJS= \
     obj/keystore.o \
     obj/main.o \
     obj/wallet.o \
+    obj/rpcdump.o \
     obj/rpc.o \
     obj/init.o \
     obj/crypter.o \
