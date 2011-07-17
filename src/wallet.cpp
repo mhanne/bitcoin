@@ -306,16 +306,17 @@ bool CWallet::AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pbl
 
 bool CWallet::EraseFromWallet(uint256 hash)
 {
-    if (!fFileBacked)
-        return false;
     CRITICAL_BLOCK(cs_mapWallet)
     {
         if (mapWallet.erase(hash))
-            CWalletDB(strWalletFile).EraseTx(hash);
+        {
+            if (fFileBacked)
+                if (!CWalletDB(strWalletFile).EraseTx(hash))
+                    return false;
+        }
     }
     return true;
 }
-
 
 bool CWallet::IsMine(const CTxIn &txin) const
 {
@@ -329,6 +330,67 @@ bool CWallet::IsMine(const CTxIn &txin) const
                 if (IsMine(prev.vout[txin.prevout.n]))
                     return true;
         }
+    }
+    return false;
+}
+
+int CWallet::PurgeWallet()
+{
+    int nPurged=0;
+
+    CRITICAL_BLOCK(cs_mapWallet)
+    {
+        vector<uint256> vToDelete;
+        map<uint256, CWalletTx>::iterator mi = mapWallet.begin();
+        while (mi != mapWallet.end())
+        {
+            CWalletTx &wtx = (*mi).second;
+            if (!IsMine(wtx) && !IsFromMe(wtx))
+                vToDelete.push_back(wtx.GetHash());
+            mi++;
+        }
+        vector<uint256>::iterator mi2 = vToDelete.begin();
+        while (mi2 != vToDelete.end())
+        {
+            if (EraseFromWallet(*mi2))
+                nPurged++;
+            mi2++;
+        }
+    }
+    return nPurged;
+}
+
+bool CWallet::RemoveKey(const CBitcoinAddress &address)
+{
+    CRITICAL_BLOCK(cs_KeyStore)
+    CRITICAL_BLOCK(cs_vMasterKey)
+    CRITICAL_BLOCK(cs_mapAddresses)
+    CRITICAL_BLOCK(cs_mapWallet)
+    {
+        vector<unsigned char> vchPubKey;
+        bool fRet = GetPubKey(address, vchPubKey);
+        if (!fRet)
+            return false;
+        fRet = CCryptoKeyStore::RemoveKey(address);
+        if (!fRet)
+            return false;
+        if (IsCrypted())
+            fRet = CWalletDB(strWalletFile).EraseCryptedKey(vchPubKey);
+        else
+            fRet = CWalletDB(strWalletFile).EraseKey(vchPubKey);
+        if (!fRet)
+            return false;
+        map<CBitcoinAddress,int64> mapReserveAddresses;
+        GetAllReserveAddresses(mapReserveAddresses);
+        if (mapReserveAddresses.count(address))
+        {
+            int64 nIndex = mapReserveAddresses[address];
+            setKeyPool.erase(nIndex);
+            KeepKey(nIndex);
+        }
+        PurgeWallet();
+        // TODO: remove from accounts
+        return true;
     }
     return false;
 }
@@ -1366,9 +1428,9 @@ void CReserveKey::ReturnKey()
     vchPubKey.clear();
 }
 
-void CWallet::GetAllReserveAddresses(set<CBitcoinAddress>& setAddress)
+void CWallet::GetAllReserveAddresses(map<CBitcoinAddress,int64>& mapAddress)
 {
-    setAddress.clear();
+    mapAddress.clear();
 
     CWalletDB walletdb(strWalletFile);
 
@@ -1382,6 +1444,6 @@ void CWallet::GetAllReserveAddresses(set<CBitcoinAddress>& setAddress)
         if (!mapKeys.count(keypool.vchPubKey))
             throw runtime_error("GetAllReserveKeyHashes() : unknown key in key pool");
         assert(!keypool.vchPubKey.empty());
-        setAddress.insert(CBitcoinAddress(keypool.vchPubKey));
+        mapAddress[CBitcoinAddress(keypool.vchPubKey)] = id;
     }
 }

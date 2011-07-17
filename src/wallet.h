@@ -60,6 +60,7 @@ public:
 
     // keystore implementation
     bool AddKey(const CKey& key);
+    bool RemoveKey(const CBitcoinAddress &address);
     bool LoadKey(const CKey& key) { return CCryptoKeyStore::AddKey(key); }
     bool AddCryptedKey(const std::vector<unsigned char> &vchPubKey, const std::vector<unsigned char> &vchCryptedSecret);
     bool LoadCryptedKey(const std::vector<unsigned char> &vchPubKey, const std::vector<unsigned char> &vchCryptedSecret) { return CCryptoKeyStore::AddCryptedKey(vchPubKey, vchCryptedSecret); }
@@ -71,6 +72,7 @@ public:
     bool AddToWallet(const CWalletTx& wtxIn);
     bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate = false, bool fFindBlock = false);
     bool EraseFromWallet(uint256 hash);
+    int PurgeWallet();
     void WalletUpdateSpent(const CTransaction& prevout);
     int ScanForWalletTransactions(CBlockIndex* pindexStart, bool fUpdate = false);
     int ScanForWalletTransaction(const uint256& hashTx);
@@ -91,7 +93,7 @@ public:
     void ReturnKey(int64 nIndex);
     std::vector<unsigned char> GetOrReuseKeyFromPool();
     int64 GetOldestKeyPoolTime();
-    void GetAllReserveAddresses(std::set<CBitcoinAddress>& setAddress);
+    void GetAllReserveAddresses(std::map<CBitcoinAddress,int64>& mapAddress);
 
     bool IsMine(const CTxIn& txin) const;
     int64 GetDebit(const CTxIn& txin) const;
