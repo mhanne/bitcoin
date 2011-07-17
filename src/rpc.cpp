@@ -13,7 +13,7 @@
 #include <boost/iostreams/stream.hpp>
 #include <boost/algorithm/string.hpp>
 #ifdef USE_SSL
-#include <boost/asio/ssl.hpp> 
+#include <boost/asio/ssl.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> SSLStream;
@@ -890,7 +890,7 @@ Value sendmany(const Array& params, bool fHelp)
         CScript scriptPubKey;
         if (!scriptPubKey.SetBitcoinAddress(strAddress))
             throw JSONRPCError(-5, string("Invalid bitcoin address:")+strAddress);
-        int64 nAmount = AmountFromValue(s.value_); 
+        int64 nAmount = AmountFromValue(s.value_);
         totalAmount += nAmount;
 
         vecSend.push_back(make_pair(scriptPubKey, nAmount));
@@ -1212,7 +1212,7 @@ Value listtransactions(const Array& params, bool fHelp)
         }
         // ret is now newest to oldest
     }
-    
+
     // Make sure we return only last nCount items (sends-to-self might give us an extra):
     if (ret.size() > nCount)
     {
@@ -1312,9 +1312,55 @@ Value gettransaction(const Array& params, bool fHelp)
         Array details;
         ListTransactions(pwalletMain->mapWallet[hash], "*", 0, false, details);
         entry.push_back(Pair("details", details));
+
+        CDataStream ss;
+        ss << wtx;
+        std::vector<unsigned char> rawtx(ss.begin(), ss.end());
+        entry.push_back(Pair("rawdata", EncodeBase58(rawtx)));
+
     }
 
     return entry;
+}
+
+
+Value importtransaction(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "importtransaction <rawdata>\n"
+            "Import an offline transaction to announce it into the network");
+
+    std::vector<unsigned char> rawtx;
+
+    if (DecodeBase58(params[0].get_str(), rawtx))
+    {
+        CDataStream vMsg(rawtx);
+
+        CTransaction tx;
+        vMsg >> tx;
+
+        CInv inv(MSG_TX, tx.GetHash());
+
+        CRITICAL_BLOCK(pwalletMain->cs_mapWallet)
+        {
+            if (tx.AcceptToMemoryPool(true))
+            {
+                pwalletMain->AddToWalletIfInvolvingMe(tx, NULL, true);
+                RelayMessage(inv, vMsg);
+                mapAlreadyAskedFor.erase(inv);
+            }
+            else
+            {
+                throw JSONRPCError(-4, "AcceptToMemoryPool failed.");
+            }
+        }
+        return tx.GetHash().GetHex();
+    }
+    else
+    {
+        throw JSONRPCError(-4, "Error decoding base58.");
+    }
 }
 
 
@@ -1739,6 +1785,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getwork",                &getwork),
     make_pair("listaccounts",           &listaccounts),
     make_pair("settxfee",               &settxfee),
+    make_pair("importtransaction",      &importtransaction),
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
 
@@ -2411,7 +2458,7 @@ int CommandLineRPC(int argc, char *argv[])
                 throw runtime_error("type mismatch");
             params[1] = v.get_obj();
         }
-        if (strMethod == "sendmany"                && n > 2) ConvertTo<boost::int64_t>(params[2]);
+        if (strMethod == "sendmany"               && n > 2) ConvertTo<boost::int64_t>(params[2]);
 
         // Execute
         Object reply = CallRPC(strMethod, params);

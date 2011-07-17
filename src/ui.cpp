@@ -1682,7 +1682,17 @@ CTxDetailsDialog::CTxDetailsDialog(wxWindow* parent, CWalletTx wtx) : CTxDetails
             }
         }
 
+        strHTML += "<hr><b>Transaction ID</b>:<br>" + wtx.GetHash().GetHex() + "<br>";
 
+        if (wxTheClipboard->Open())
+        {
+            CDataStream ss;
+            ss << wtx;
+            std::vector<unsigned char> rawtx(ss.begin(), ss.end());
+            wxTheClipboard->SetData(new wxTextDataObject(EncodeBase58(rawtx)));
+            wxTheClipboard->Close();
+            strHTML += "<b>Raw transaction data has been copied to Clipboard.";
+        }
 
         strHTML += "</font></html>";
         string(strHTML.begin(), strHTML.end()).swap(strHTML);
@@ -2064,7 +2074,7 @@ CSendDialog::CSendDialog(wxWindow* parent, const wxString& strAddress) : CSendDi
     m_bitmapCheckMark->Show(false);
     fEnabledPrev = true;
     m_textCtrlAddress->SetFocus();
-    
+
     //// todo: should add a display of your balance for convenience
 #ifndef __WXMSW__
     wxFont fontTmp = m_staticTextInstructions->GetFont();
@@ -2075,7 +2085,7 @@ CSendDialog::CSendDialog(wxWindow* parent, const wxString& strAddress) : CSendDi
 #else
     SetSize(nScaleX * GetSize().GetWidth(), nScaleY * GetSize().GetHeight());
 #endif
-    
+
     // Set Icon
     if (nScaleX == 1.0 && nScaleY == 1.0) // We don't have icons of the proper size otherwise
     {
@@ -2140,6 +2150,39 @@ void CSendDialog::OnButtonSend(wxCommandEvent& event)
         int64 nValue = 0;
         if (!ParseMoney(m_textCtrlAmount->GetValue(), nValue) || nValue <= 0)
         {
+            // no amount, so maybe importing a transaction...
+            try
+            {
+                std::vector<unsigned char> rawtx;
+
+                if (DecodeBase58(strAddress, rawtx))
+                {
+                    CDataStream vMsg(rawtx);
+
+                    CTransaction tx;
+                    vMsg >> tx;
+
+                    CInv inv(MSG_TX, tx.GetHash());
+
+                    CRITICAL_BLOCK(pwalletMain->cs_mapWallet)
+                    {
+                        if (tx.AcceptToMemoryPool(true))
+                        {
+                            pwalletMain->AddToWalletIfInvolvingMe(tx, NULL, true);
+                            RelayMessage(inv, vMsg);
+                            mapAlreadyAskedFor.erase(inv);
+                            wxMessageBox(_("Transaction imported"), _("Import Transaction"));
+                        }
+                        else
+                        {
+                            wxMessageBox(_("AcceptToMemoryPool failed"), _("Import Transaction"));
+                        }
+                    }
+                    EndModal(false);
+                    return;
+                }
+            }
+            catch (std::exception& e) {}
             wxMessageBox(_("Error in amount  "), _("Send Coins"));
             return;
         }
@@ -2160,9 +2203,9 @@ void CSendDialog::OnButtonSend(wxCommandEvent& event)
 
         if (fBitcoinAddress)
         {
-	    CRITICAL_BLOCK(cs_main)
+        CRITICAL_BLOCK(cs_main)
             CRITICAL_BLOCK(pwalletMain->cs_vMasterKey)
-	    {
+        {
                 bool fWasLocked = pwalletMain->IsLocked();
                 if (!GetWalletPassphrase())
                     return;
@@ -2191,7 +2234,7 @@ void CSendDialog::OnButtonSend(wxCommandEvent& event)
 
                 if (fWasLocked)
                     pwalletMain->Lock();
-	    }
+        }
         }
         else
         {
