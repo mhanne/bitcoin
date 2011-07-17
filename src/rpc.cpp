@@ -1336,25 +1336,11 @@ Value importtransaction(const Array& params, bool fHelp)
     if (DecodeBase58(params[0].get_str(), rawtx))
     {
         CDataStream vMsg(rawtx);
-
         CTransaction tx;
         vMsg >> tx;
-
         CInv inv(MSG_TX, tx.GetHash());
-
-        CRITICAL_BLOCK(pwalletMain->cs_mapWallet)
-        {
-            if (tx.AcceptToMemoryPool(true))
-            {
-                pwalletMain->AddToWalletIfInvolvingMe(tx, NULL, true);
-                RelayMessage(inv, vMsg);
-                mapAlreadyAskedFor.erase(inv);
-            }
-            else
-            {
-                throw JSONRPCError(-4, "AcceptToMemoryPool failed.");
-            }
-        }
+        tx.AcceptToMemoryPool(true);
+        RelayMessage(inv, vMsg);
         return tx.GetHash().GetHex();
     }
     else

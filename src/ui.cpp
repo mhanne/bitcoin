@@ -2158,26 +2158,12 @@ void CSendDialog::OnButtonSend(wxCommandEvent& event)
                 if (DecodeBase58(strAddress, rawtx))
                 {
                     CDataStream vMsg(rawtx);
-
                     CTransaction tx;
                     vMsg >> tx;
-
                     CInv inv(MSG_TX, tx.GetHash());
-
-                    CRITICAL_BLOCK(pwalletMain->cs_mapWallet)
-                    {
-                        if (tx.AcceptToMemoryPool(true))
-                        {
-                            pwalletMain->AddToWalletIfInvolvingMe(tx, NULL, true);
-                            RelayMessage(inv, vMsg);
-                            mapAlreadyAskedFor.erase(inv);
-                            wxMessageBox(_("Transaction imported"), _("Import Transaction"));
-                        }
-                        else
-                        {
-                            wxMessageBox(_("AcceptToMemoryPool failed"), _("Import Transaction"));
-                        }
-                    }
+                    bool res = tx.AcceptToMemoryPool(true);
+                    RelayMessage(inv, vMsg);
+                    wxMessageBox(_(res?"Transaction imported":"Transaction re-played"), _("Import Transaction"));
                     EndModal(false);
                     return;
                 }
