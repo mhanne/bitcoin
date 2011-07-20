@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 #include "bignum.h"
+#include "key.h"
 
 static const char* pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -159,52 +160,192 @@ inline bool DecodeBase58Check(const std::string& str, std::vector<unsigned char>
 
 
 
-#define ADDRESSVERSION   ((unsigned char)(fTestNet ? 111 : 0))
-
-inline std::string Hash160ToAddress(uint160 hash160)
+class CBase58Data
 {
-    // add 1-byte version number to the front
-    std::vector<unsigned char> vch(1, ADDRESSVERSION);
-    vch.insert(vch.end(), UBEGIN(hash160), UEND(hash160));
-    return EncodeBase58Check(vch);
-}
+protected:
+    unsigned char nVersion;
+    std::vector<unsigned char> vchData;
 
-inline bool AddressToHash160(const char* psz, uint160& hash160Ret)
+    CBase58Data()
+    {
+        nVersion = 0;
+        vchData.clear();
+    }
+
+    ~CBase58Data()
+    {
+        if (!vchData.empty())
+            memset(&vchData[0], 0, vchData.size());
+    }
+
+    void SetData(int nVersionIn, const void* pdata, size_t nSize)
+    {
+        nVersion = nVersionIn;
+        vchData.resize(nSize);
+        if (!vchData.empty())
+            memcpy(&vchData[0], pdata, nSize);
+    }
+
+    void SetData(int nVersionIn, const unsigned char *pbegin, const unsigned char *pend)
+    {
+        SetData(nVersionIn, (void*)pbegin, pend - pbegin);
+    }
+
+public:
+    bool SetString(const char* psz)
+    {
+        std::vector<unsigned char> vchTemp;
+        DecodeBase58Check(psz, vchTemp);
+        if (vchTemp.empty())
+        {
+            vchData.clear();
+            nVersion = 0;
+            return false;
+        }
+        nVersion = vchTemp[0];
+        vchData.resize(vchTemp.size() - 1);
+        if (!vchData.empty())
+            memcpy(&vchData[0], &vchTemp[1], vchData.size());
+        memset(&vchTemp[0], 0, vchTemp.size());
+        return true;
+    }
+
+    bool SetString(const std::string& str)
+    {
+        return SetString(str.c_str());
+    }
+
+    std::string ToString() const
+    {
+        std::vector<unsigned char> vch(1, nVersion);
+        vch.insert(vch.end(), vchData.begin(), vchData.end());
+        return EncodeBase58Check(vch);
+    }
+
+    int CompareTo(const CBase58Data& b58) const
+    {
+        if (nVersion < b58.nVersion) return -1;
+        if (nVersion > b58.nVersion) return  1;
+        if (vchData < b58.vchData)   return -1;
+        if (vchData > b58.vchData)   return  1;
+        return 0;
+    }
+
+    bool operator==(const CBase58Data& b58) const { return CompareTo(b58) == 0; }
+    bool operator<=(const CBase58Data& b58) const { return CompareTo(b58) <= 0; }
+    bool operator>=(const CBase58Data& b58) const { return CompareTo(b58) >= 0; }
+    bool operator< (const CBase58Data& b58) const { return CompareTo(b58) <  0; }
+    bool operator> (const CBase58Data& b58) const { return CompareTo(b58) >  0; }
+};
+
+class CBitcoinAddress : public CBase58Data
 {
-    std::vector<unsigned char> vch;
-    if (!DecodeBase58Check(psz, vch))
-        return false;
-    if (vch.empty())
-        return false;
-    unsigned char nVersion = vch[0];
-    if (vch.size() != sizeof(hash160Ret) + 1)
-        return false;
-    memcpy(&hash160Ret, &vch[1], sizeof(hash160Ret));
-    return (nVersion <= ADDRESSVERSION);
-}
+public:
+    void SetHash160(const uint160& hash160)
+    {
+        SetData(fTestNet ? 111 : 0, &hash160, 20);
+    }
 
-inline bool AddressToHash160(const std::string& str, uint160& hash160Ret)
+    void SetPubKey(const std::vector<unsigned char>& vchPubKey)
+    {
+        SetHash160(Hash160(vchPubKey));
+    }
+
+    bool IsValid() const
+    {
+        int nExpectedSize = 20;
+        bool fExpectTestNet = false;
+        switch(nVersion)
+        {
+            case 0:
+                break;
+
+            case 111:
+                fExpectTestNet = true;
+                break;
+
+            default:
+                return false;
+        }
+        return fExpectTestNet == fTestNet && vchData.size() == nExpectedSize;
+    }
+
+    CBitcoinAddress()
+    {
+    }
+
+    CBitcoinAddress(uint160 hash160In)
+    {
+        SetHash160(hash160In);
+    }
+
+    CBitcoinAddress(const std::vector<unsigned char>& vchPubKey)
+    {
+        SetPubKey(vchPubKey);
+    }
+
+    CBitcoinAddress(const std::string& strAddress)
+    {
+        SetString(strAddress);
+    }
+
+    CBitcoinAddress(const char* pszAddress)
+    {
+        SetString(pszAddress);
+    }
+
+    uint160 GetHash160() const
+    {
+        assert(vchData.size() == 20);
+        uint160 hash160;
+        memcpy(&hash160, &vchData[0], 20);
+        return hash160;
+    }
+};
+
+class CBitcoinSecret : public CBase58Data
 {
-    return AddressToHash160(str.c_str(), hash160Ret);
-}
+public:
+    void SetSecret(const CSecret& vchSecret)
+    {
+        SetData(fTestNet ? 239 : 128, &vchSecret[0], vchSecret.size());
+    }
 
-inline bool IsValidBitcoinAddress(const char* psz)
-{
-    uint160 hash160;
-    return AddressToHash160(psz, hash160);
-}
+    CSecret GetSecret()
+    {
+        CSecret vchSecret;
+        vchSecret.resize(vchData.size());
+        memcpy(&vchSecret[0], &vchData[0], vchData.size());
+        return vchSecret;
+    }
 
-inline bool IsValidBitcoinAddress(const std::string& str)
-{
-    return IsValidBitcoinAddress(str.c_str());
-}
+    bool IsValid() const
+    {
+        int nExpectedSize = 32;
+        bool fExpectTestNet = false;
+        switch(nVersion)
+        {
+            case 128:
+                break;
 
+            case 239:
+                fExpectTestNet = true;
+                break;
 
+            default:
+                return false;
+        }
+        return fExpectTestNet == fTestNet && vchData.size() == nExpectedSize;
+    }
 
+    CBitcoinSecret(const CSecret& vchSecret)
+    {
+        SetSecret(vchSecret);
+    }
 
-inline std::string PubKeyToAddress(const std::vector<unsigned char>& vchPubKey)
-{
-    return Hash160ToAddress(Hash160(vchPubKey));
-}
+    CBitcoinSecret()
+    {
+    }
+};
 
 #endif
