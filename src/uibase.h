@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////
-// C++ code generated with wxFormBuilder (version Dec 21 2009)
+// C++ code generated with wxFormBuilder (version Sep  8 2010)
 // http://www.wxformbuilder.org/
 //
 // PLEASE DO "NOT" EDIT THIS FILE!
@@ -100,6 +100,7 @@ class CMainFrameBase : public wxFrame
 		virtual void OnMenuOptionsChangeYourAddress( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnMenuOptionsEncryptWallet( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnMenuOptionsChangeWalletPassphrase( wxCommandEvent& event ) { event.Skip(); }
+		virtual void OnMenuOptionsImportTransaction( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnMenuOptionsOptions( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnMenuHelpAbout( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnButtonSend( wxCommandEvent& event ) { event.Skip(); }
@@ -140,9 +141,11 @@ class CTxDetailsDialogBase : public wxDialog
 	
 	protected:
 		wxHtmlWindow* m_htmlWin;
+		wxButton* m_buttonExport;
 		wxButton* m_buttonOK;
 		
 		// Virtual event handlers, overide them in your derived class
+		virtual void OnButtonExport( wxCommandEvent& event ) { event.Skip(); }
 		virtual void OnButtonOK( wxCommandEvent& event ) { event.Skip(); }
 		
 	

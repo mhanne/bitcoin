@@ -59,6 +59,7 @@ protected:
     void OnMenuFileExit(wxCommandEvent& event);
     void OnUpdateUIOptionsGenerate(wxUpdateUIEvent& event);
     void OnMenuOptionsChangeYourAddress(wxCommandEvent& event);
+    void OnMenuOptionsImportTransaction(wxCommandEvent& event);
     void OnMenuOptionsEncryptWallet(wxCommandEvent& event);
     void OnMenuOptionsChangeWalletPassphrase(wxCommandEvent& event);
     void OnMenuOptionsOptions(wxCommandEvent& event);
@@ -74,7 +75,7 @@ protected:
     void OnListItemActivatedProductsSent(wxListEvent& event);
     void OnListItemActivatedOrdersSent(wxListEvent& event);
     void OnListItemActivatedOrdersReceived(wxListEvent& event);
-	
+
 public:
     /** Constructor */
     CMainFrame(wxWindow* parent);
@@ -116,6 +117,7 @@ class CTxDetailsDialog : public CTxDetailsDialogBase
 protected:
     // Event handlers
     void OnButtonOK(wxCommandEvent& event);
+    void OnButtonExport(wxCommandEvent& event);
 
 public:
     /** Constructor */
@@ -176,7 +178,7 @@ protected:
     void OnButtonPaste(wxCommandEvent& event);
     void OnButtonSend(wxCommandEvent& event);
     void OnButtonCancel(wxCommandEvent& event);
-	
+
 public:
     /** Constructor */
     CSendDialog(wxWindow* parent, const wxString& strAddress="");
@@ -197,7 +199,7 @@ public:
     void OnButtonOK(wxCommandEvent& event);
     void OnButtonCancel(wxCommandEvent& event);
     void OnPaint(wxPaintEvent& event);
-	
+
 public:
     /** Constructor */
     CSendingDialog(wxWindow* parent, const CAddress& addrIn, int64 nPriceIn, const CWalletTx& wtxIn);
