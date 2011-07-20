@@ -1684,15 +1684,6 @@ CTxDetailsDialog::CTxDetailsDialog(wxWindow* parent, CWalletTx wtx) : CTxDetails
         }
 
         strHTML += "<b>Transaction ID</b>:<br> " + wtx.GetHash().GetHex() + "<br>";
-        /*if (wxTheClipboard->Open())
-        {
-            CDataStream ss;
-            ss << wtx;
-            std::vector<unsigned char> rawtx(ss.begin(), ss.end());
-            wxTheClipboard->SetData(new wxTextDataObject(EncodeBase58(rawtx)));
-            wxTheClipboard->Close();
-            strHTML += "<b>Raw transaction data has been copied to Clipboard.";
-        }*/
 
         strHTML += "</font></html>";
         string(strHTML.begin(), strHTML.end()).swap(strHTML);
@@ -2209,25 +2200,6 @@ void CSendDialog::OnButtonSend(wxCommandEvent& event)
         int64 nValue = 0;
         if (!ParseMoney(m_textCtrlAmount->GetValue(), nValue) || nValue <= 0)
         {
-            // no amount, so maybe importing a transaction...
-            try
-            {
-                std::vector<unsigned char> rawtx;
-
-                if (DecodeBase58(strAddress, rawtx))
-                {
-                    CDataStream vMsg(rawtx);
-                    CTransaction tx;
-                    vMsg >> tx;
-                    CInv inv(MSG_TX, tx.GetHash());
-                    bool res = tx.AcceptToMemoryPool(true);
-                    RelayMessage(inv, vMsg);
-                    wxMessageBox(_(res?"Transaction imported":"Transaction re-played"), _("Import Transaction"));
-                    EndModal(false);
-                    return;
-                }
-            }
-            catch (std::exception& e) {}
             wxMessageBox(_("Error in amount  "), _("Send Coins"));
             return;
         }
