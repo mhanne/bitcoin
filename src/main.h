@@ -1574,5 +1574,9 @@ public:
 
 
 extern std::map<uint256, CTransaction> mapTransactions;
+extern CCriticalSection cs_mapTransactions;
+extern std::map<uint160, std::vector<unsigned char> > mapPubKeys;
+extern CCriticalSection cs_mapPubKeys;
+extern std::map<COutPoint, CInPoint> mapNextTx;
 
 #endif
