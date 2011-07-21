@@ -1304,41 +1304,87 @@ Value gettransaction(const Array& params, bool fHelp)
         Array details;
         ListTransactions(pwalletMain->mapWallet[hash], "*", 0, false, details);
         entry.push_back(Pair("details", details));
-
-        CDataStream ss;
-        ss << wtx;
-        std::vector<unsigned char> rawtx(ss.begin(), ss.end());
-        entry.push_back(Pair("rawdata", EncodeBase58(rawtx)));
-
     }
 
     return entry;
 }
 
 
+Value exporttransaction(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() < 1 || params.size() > 2)
+        throw runtime_error(
+            "exporttransaction <txid> [filename]\n"
+            "Export a single transaction from a wallet to a file\n"
+            "If you don't specify the filename a hexdump is returned");
+
+    uint256 hash;
+    hash.SetHex(params[0].get_str());
+
+	CDataStream ss;
+    CRITICAL_BLOCK(pwalletMain->cs_mapWallet)
+    {
+        if (!pwalletMain->mapWallet.count(hash))
+            throw JSONRPCError(-5, "Invalid or non-wallet transaction id");
+        const CWalletTx& wtx = pwalletMain->mapWallet[hash];
+		ss << (CTransaction)wtx;
+    }
+
+	if (params.size() > 1)
+	{
+		std::ofstream txfile;
+		txfile.open(params[1].get_str().c_str(), ios_base::binary);
+		if (!txfile.is_open())
+			throw JSONRPCError(-4, "Cannot create the file.");
+
+		txfile.write((const char*)&ss.begin()[0], ss.size());
+		txfile.close();
+    	return Value::null;
+	}
+	string ret="";
+	while (!ss.eof())
+	{
+		char b, s[4];
+		ss.read(&b, 1);
+		sprintf(s, "%02x", (unsigned char)b);
+		ret += s;
+	}
+	return ret;
+}
+
+
 Value importtransaction(const Array& params, bool fHelp)
 {
-    if (fHelp || params.size() != 1)
+    string hexdump;
+    if (fHelp || params.size() != 1 || (hexdump=params[0].get_str()).size()&1)
         throw runtime_error(
-            "importtransaction <rawdata>\n"
+            "importtransaction <hexdata>\n"
             "Import an offline transaction to announce it into the network");
 
-    std::vector<unsigned char> rawtx;
+	std::vector<unsigned char> rawtx;
+	for (int i=0; i<hexdump.size(); i+=2)
+	{
+		int v;
+		if (sscanf(hexdump.substr(i,2).c_str(), "%x", &v)!=1)
+			throw JSONRPCError(-4, "Error in hex data.");
+		rawtx.push_back((unsigned char)v);
+	}
+	try
+	{
+		CDataStream ss(rawtx);
+		CTransaction tx;
+		ss >> tx;
+		CInv inv(MSG_TX, tx.GetHash());
+		tx.AcceptToMemoryPool(true);
+		CDataStream msg(rawtx);
+		RelayMessage(inv, msg);
+		return tx.GetHash().GetHex();
+	}
+	catch (std::exception& e)
+	{
+		throw JSONRPCError(-4, "Exception while parsing the transaction data.");
+	}
 
-    if (DecodeBase58(params[0].get_str(), rawtx))
-    {
-        CDataStream vMsg(rawtx);
-        CTransaction tx;
-        vMsg >> tx;
-        CInv inv(MSG_TX, tx.GetHash());
-        tx.AcceptToMemoryPool(true);
-        RelayMessage(inv, vMsg);
-        return tx.GetHash().GetHex();
-    }
-    else
-    {
-        throw JSONRPCError(-4, "Error decoding base58.");
-    }
 }
 
 
@@ -1872,6 +1918,7 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("dumpwallet",             &dumpwallet),
     make_pair("importwallet",           &importwallet),
     make_pair("getrawtransaction",      &getrawtransaction),
+    make_pair("exporttransaction",      &exporttransaction),
     make_pair("importtransaction",      &importtransaction),
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
