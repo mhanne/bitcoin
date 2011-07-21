@@ -1702,8 +1702,8 @@ void CTxDetailsDialog::OnButtonExport(wxCommandEvent& event)
 {
 	wxFileDialog* SaveDialog = new wxFileDialog(
 		this, _("Choose a file to store the transaction"), wxEmptyString,
-		wtx.GetHash().GetHex() + _(".btf"),
-		_("Bitcoin Transaction Files (*.btf)|*.btf|All files (*.*)|*.*"),
+		wtx.GetHash().GetHex() + _(".btd"),
+		_("Bitcoin Transaction Dump (*.btd)|*.btd|All files (*.*)|*.*"),
 		wxFD_SAVE, wxDefaultPosition);
 	int result = SaveDialog->ShowModal();
 	SaveDialog->Destroy();
@@ -1711,11 +1711,17 @@ void CTxDetailsDialog::OnButtonExport(wxCommandEvent& event)
 	{
 		CDataStream ss;
 		ss << (CTransaction)wtx;
-		std::vector<unsigned char> rawtx(ss.begin(), ss.end());
 		std::ofstream txfile;
-		txfile.open(SaveDialog->GetPath());
-		txfile << EncodeBase58(rawtx);
-		txfile.close();
+		txfile.open(SaveDialog->GetPath(), ios_base::binary);
+		if (txfile.is_open())
+		{
+			txfile.write((const char*)&ss.begin()[0], ss.size());
+			txfile.close();
+		}
+		else
+		{
+			wxMessageBox(_("Could not write to the file"), _("Export Transaction"), wxOK | wxICON_ERROR);
+		}
 		EndModal(false);
 	}
 }
@@ -1725,40 +1731,49 @@ void CMainFrame::OnMenuOptionsImportTransaction(wxCommandEvent& event)
 {
 	wxFileDialog* OpenDialog = new wxFileDialog(
 		this, _("Choose a transaction file to import"), wxEmptyString, wxEmptyString,
-		_("Bitcoin Transaction Files (*.btf)|*.btf|All files (*.*)|*.*"),
+		_("Bitcoin Transaction Dump (*.btd)|*.btd|All files (*.*)|*.*"),
 		wxFD_OPEN, wxDefaultPosition);
 	int result = OpenDialog->ShowModal();
 	OpenDialog->Destroy();
 	if (result != wxID_OK)  return ;
 
 	std::ifstream txfile;
-	txfile.open(OpenDialog->GetPath());
-	std::string s;
-	getline(txfile, s);
-	txfile.close();
-	std::vector<unsigned char> rawtx;
-	if (!DecodeBase58(s.c_str(), rawtx))
+	txfile.open(OpenDialog->GetPath(), ios_base::binary|ios_base::ate);
+	if (!txfile.is_open())
 	{
-		wxMessageBox(_("DecodeBase58 error"), _("Import Transaction"));
-		return ;
-	}
-	CDataStream ss(rawtx);
-	CTransaction tx;
-	ss >> tx;
-
-	/* Check if this transaction is already known (if so ask to abort) */
-	CTxDB txdb("r");
-    CTxIndex txindex;
-	if (txdb.ReadTxIndex(tx.GetHash(), txindex) &&
-		wxMessageBox(_("This transaction is already in the blockchain.\nImport it anyway?"), _("Import Transaction"), wxOK | wxCANCEL) != wxOK
-		)
+		wxMessageBox(_("Could not read from the file"), _("Import Transaction"), wxOK | wxICON_ERROR);
 		return;
+	}
 
-	CInv inv(MSG_TX, tx.GetHash());
-	tx.AcceptToMemoryPool(true);
-	CDataStream msg(rawtx);
-	RelayMessage(inv, msg);
-	wxMessageBox("Transaction imported.\nIf it will not appear in the blockchain redo the import.", _("Import Transaction"));
+	try
+	{
+		std::ifstream::pos_type flen = txfile.tellg();
+		txfile.seekg(0, std::ios::beg);
+		std::vector<unsigned char> rawtx(flen);
+		txfile.read((char*)&rawtx[0], flen);
+		txfile.close();
+		CDataStream ss(rawtx);
+		CTransaction tx;
+		ss >> tx;
+
+		/* Check if this transaction is already known (if so ask to abort) */
+		CTxDB txdb("r");
+		CTxIndex txindex;
+		if (txdb.ReadTxIndex(tx.GetHash(), txindex) &&
+			wxMessageBox(_("This transaction is already in the blockchain.\nImport it anyway?"), _("Import Transaction"), wxOK | wxCANCEL) != wxOK
+			)
+			return;
+
+		CInv inv(MSG_TX, tx.GetHash());
+		tx.AcceptToMemoryPool(true);
+		CDataStream msg(rawtx);
+		RelayMessage(inv, msg);
+		wxMessageBox("Transaction imported.\nIf it will not appear in the blockchain redo the import.", _("Import Transaction"));
+	}
+	catch (std::exception& e)
+	{
+		wxMessageBox(_("Exception occured while parsing the transaction file"), _("Import Transaction"), wxOK | wxICON_ERROR);
+	}
 }
 
 
