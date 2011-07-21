@@ -1710,7 +1710,7 @@ void CTxDetailsDialog::OnButtonExport(wxCommandEvent& event)
 	if (result == wxID_OK)
 	{
 		CDataStream ss;
-		ss << wtx;
+		ss << (CTransaction)wtx;
 		std::vector<unsigned char> rawtx(ss.begin(), ss.end());
 		std::ofstream txfile;
 		txfile.open(SaveDialog->GetPath());
@@ -1756,7 +1756,8 @@ void CMainFrame::OnMenuOptionsImportTransaction(wxCommandEvent& event)
 
 	CInv inv(MSG_TX, tx.GetHash());
 	tx.AcceptToMemoryPool(true);
-	RelayMessage(inv, ss);
+	CDataStream msg(rawtx);
+	RelayMessage(inv, msg);
 	wxMessageBox("Transaction imported.\nIf it will not appear in the blockchain redo the import.", _("Import Transaction"));
 }
 

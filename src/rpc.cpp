@@ -1314,7 +1314,7 @@ Value gettransaction(const Array& params, bool fHelp)
         entry.push_back(Pair("details", details));
 
         CDataStream ss;
-        ss << wtx;
+        ss << (CTransaction)wtx;
         std::vector<unsigned char> rawtx(ss.begin(), ss.end());
         entry.push_back(Pair("rawdata", EncodeBase58(rawtx)));
 
@@ -1335,12 +1335,13 @@ Value importtransaction(const Array& params, bool fHelp)
 
     if (DecodeBase58(params[0].get_str(), rawtx))
     {
-        CDataStream vMsg(rawtx);
+        CDataStream ss(rawtx);
         CTransaction tx;
-        vMsg >> tx;
+        ss >> tx;
         CInv inv(MSG_TX, tx.GetHash());
         tx.AcceptToMemoryPool(true);
-        RelayMessage(inv, vMsg);
+        CDataStream msg(rawtx);
+        RelayMessage(inv, msg);
         return tx.GetHash().GetHex();
     }
     else
